@@ -1,7 +1,6 @@
 "use server";
 
 import bcrypt from "bcryptjs";
-import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { registerSchema, type RegisterInput } from "@/validations/expense";
 
@@ -44,5 +43,5 @@ export async function register(
     data: { name, email, password: hashedPassword },
   });
 
-  redirect("/login");
+  return { success: true, error: null, fieldErrors: {} };
 }

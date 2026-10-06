@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -37,6 +37,7 @@ export function ExpenseTable({ initialData, filters }: ExpenseTableProps) {
   const [endDate, setEndDate] = useState(filters.endDate);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const debouncedSearch = useDebounce(search);
+  const isFirstRender = useRef(true);
 
   const updateFilters = useCallback(
     (updates: Record<string, string>) => {
@@ -54,6 +55,16 @@ export function ExpenseTable({ initialData, filters }: ExpenseTableProps) {
     },
     [debouncedSearch, category, startDate, endDate, router]
   );
+
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    if (debouncedSearch !== filters.search) {
+      updateFilters({ search: debouncedSearch });
+    }
+  }, [debouncedSearch, filters.search, updateFilters]);
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -119,10 +130,7 @@ export function ExpenseTable({ initialData, filters }: ExpenseTableProps) {
                 placeholder="Search expenses..."
                 className="pl-9"
                 value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  updateFilters({ search: e.target.value });
-                }}
+                onChange={(e) => setSearch(e.target.value)}
               />
             </div>
             <Select

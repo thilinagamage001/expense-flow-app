@@ -1,0 +1,27 @@
+# AWS Region
+aws_region = "ap-southeast-1"
+
+project_name = "expenseflow"
+environment  = "production"
+
+# EC2
+ec2_instance_type = "t3.micro"
+ssh_public_key    = ""
+
+# Database backend
+enable_rds                = false
+rds_instance_class         = "db.t3.micro"
+db_name                   = "expenseflow"
+db_username               = "postgres"
+db_password               = "CHANGE_ME_MIN_16_CHARS"
+db_port                   = 5432
+db_data_volume_size       = 0
+rds_skip_final_snapshot   = false
+rds_backup_retention_days = 7
+
+# NextAuth
+nextauth_secret = "CHANGE_ME_WITH_OPENSSL_RAND_BASE64_32"
+
+# Docker Image in GitHub Container Registry
+docker_image = "ghcr.io/thilinagamage001/expense-flow-app:latest"
+

@@ -7,6 +7,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import {
   expenseSchema,
+  profileSchema,
   type ExpenseInput,
 } from "@/validations/expense";
 import type {
@@ -67,6 +68,8 @@ export async function createExpense(
     },
   });
 
+  revalidatePath("/expenses");
+  revalidatePath("/dashboard");
   redirect("/expenses");
 }
 
@@ -113,6 +116,8 @@ export async function updateExpense(
     },
   });
 
+  revalidatePath("/expenses");
+  revalidatePath("/dashboard");
   redirect("/expenses");
 }
 
@@ -153,7 +158,9 @@ export async function getExpenses(
       (where.date as Record<string, Date>).gte = new Date(filters.startDate);
     }
     if (filters.endDate) {
-      (where.date as Record<string, Date>).lte = new Date(filters.endDate);
+      const end = new Date(filters.endDate);
+      end.setUTCHours(23, 59, 59, 999);
+      (where.date as Record<string, Date>).lte = end;
     }
   }
 
@@ -277,16 +284,20 @@ export async function updateProfile(
   formData: FormData
 ): Promise<{ success: boolean; error: string | null }> {
   const userId = await requireUser();
-  const name = formData.get("name") as string;
-  const email = formData.get("email") as string;
+  const raw = {
+    name: (formData.get("name") as string) ?? "",
+    email: (formData.get("email") as string) ?? "",
+  };
 
-  if (!name || name.length < 2) {
-    return { success: false, error: "Name must be at least 2 characters" };
+  const parsed = profileSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: parsed.error.issues[0]?.message ?? "Invalid profile input",
+    };
   }
 
-  if (!email || !email.includes("@")) {
-    return { success: false, error: "Invalid email address" };
-  }
+  const { name, email } = parsed.data;
 
   const existing = await db.user.findFirst({
     where: { email, NOT: { id: userId } },
@@ -301,7 +312,13 @@ export async function updateProfile(
   });
 
   revalidatePath("/profile");
+  revalidatePath("/", "layout");
   return { success: true, error: null };
+}
+
+function escapeCsvCell(value: string): string {
+  const safeFormula = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${safeFormula.replace(/"/g, '""')}"`;
 }
 
 export async function exportExpensesToCSV() {
@@ -320,6 +337,8 @@ export async function exportExpensesToCSV() {
     new Date(e.date).toISOString().split("T")[0],
   ]);
 
-  const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+  const csv = [headers, ...rows]
+    .map((r) => r.map((c) => escapeCsvCell(String(c))).join(","))
+    .join("\n");
   return csv;
 }

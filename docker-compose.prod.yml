@@ -1,0 +1,52 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: expenseflow:latest
+    container_name: expenseflow-app
+    restart: unless-stopped
+    ports:
+      # Expose only to localhost on the host so Nginx handles public traffic
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - .env.production
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Optional local Postgres container if not using AWS RDS
+  # To use RDS, comment out this service and set DATABASE_URL to your RDS endpoint
+  postgres:
+    image: postgres:16-alpine
+    container_name: expenseflow-db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-expenseflow}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    profiles:
+      - local-db
+
+volumes:
+  pgdata:

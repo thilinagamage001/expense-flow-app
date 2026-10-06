@@ -3,16 +3,6 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-const CATEGORIES = [
-  "food",
-  "transportation",
-  "shopping",
-  "bills",
-  "entertainment",
-  "healthcare",
-  "other",
-];
-
 const SAMPLE_EXPENSES = [
   { title: "Grocery Store", category: "food", amount: 67.5 },
   { title: "Gas Station", category: "transportation", amount: 45.0 },

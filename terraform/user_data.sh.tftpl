@@ -1,0 +1,311 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+exec > >(tee /var/log/expenseflow-init.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+
+# 1. Configure 4 GB Swapfile (Protects t3.micro 1 GB RAM from OOM)
+if [ ! -f /swapfile ]; then
+  fallocate -l 4096M /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+sysctl -w vm.swappiness=10
+echo 'vm.swappiness=10' > /etc/sysctl.d/99-expenseflow.conf
+
+# 2. Install System Dependencies, Docker, Docker Compose v2 & Nginx
+apt-get update -y
+apt-get install -y \
+  ca-certificates \
+  curl \
+  wget \
+  jq \
+  unzip \
+  git \
+  nginx \
+  certbot \
+  python3-certbot-nginx \
+  docker.io \
+  docker-compose-v2
+
+# 3. Install AWS CLI v2 if not present (Ubuntu 24.04 does not ship awscli in apt)
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+
+# 4. Configure Docker Daemon with Log Rotation
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << 'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "live-restore": true
+}
+EOF
+
+systemctl enable docker
+systemctl restart docker
+usermod -aG docker ubuntu || true
+
+# 5. Prepare Application Directory & External Docker Network
+mkdir -p /opt/expenseflow/pgdata /opt/expenseflow/backups /var/www/certbot
+chown -R ubuntu:ubuntu /opt/expenseflow
+chmod 700 /opt/expenseflow/pgdata /opt/expenseflow/backups
+
+docker network inspect expenseflow-network >/dev/null 2>&1 || docker network create expenseflow-network
+
+# 6. Write Docker Compose File
+cat > /opt/expenseflow/docker-compose.yml << 'EOF'
+services:
+  app:
+    image: $${DOCKER_IMAGE:-${docker_image}}
+    container_name: ${project_name}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    env_file:
+      - .env
+    networks:
+      - expenseflow-network
+%{ if !enable_rds ~}
+    depends_on:
+      postgres:
+        condition: service_healthy
+%{ endif ~}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+%{ if !enable_rds ~}
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${project_name}-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${db_username}
+      POSTGRES_PASSWORD: $${DB_PASSWORD}
+      POSTGRES_DB: ${db_name}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - /opt/expenseflow/pgdata:/var/lib/postgresql/data
+    networks:
+      - expenseflow-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${db_username} -d ${db_name}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+        reservations:
+          memory: 128M
+%{ endif ~}
+
+networks:
+  expenseflow-network:
+    external: true
+EOF
+chown ubuntu:ubuntu /opt/expenseflow/docker-compose.yml
+
+# 7. Configure Nginx Reverse Proxy (Port 80 + Rate Limiting + Health Check)
+cat > /etc/nginx/sites-available/${project_name} << 'EOF'
+upstream app_server {
+    server 127.0.0.1:3000;
+    keepalive 32;
+}
+
+limit_req_zone $binary_remote_addr zone=auth_limit:10m rate=10r/m;
+limit_req_zone $binary_remote_addr zone=general_limit:10m rate=30r/m;
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+    client_max_body_size 10M;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location /api/health {
+        proxy_pass http://app_server;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /api/auth {
+        limit_req zone=auth_limit burst=5 nodelay;
+        proxy_pass http://app_server;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /_next/static {
+        proxy_pass http://app_server;
+        proxy_cache_valid 200 365d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location / {
+        limit_req zone=general_limit burst=20 nodelay;
+        proxy_pass http://app_server;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/${project_name} /etc/nginx/sites-enabled/${project_name}
+systemctl enable nginx
+systemctl restart nginx
+
+%{ if !enable_rds ~}
+# 8. Install Nightly PostgreSQL Backup Script & Cron
+cat > /usr/local/bin/expenseflow-db-backup.sh << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+BACKUP_DIR="/opt/expenseflow/backups"
+mkdir -p "$BACKUP_DIR"
+ts="$(date +%Y%m%d_%H%M%S)"
+docker exec "${project_name}-db" pg_dump -U "${db_username}" -d "${db_name}" --clean --if-exists \
+  | gzip > "$BACKUP_DIR/${project_name}_$${ts}.sql.gz"
+gzip -t "$BACKUP_DIR/${project_name}_$${ts}.sql.gz"
+find "$BACKUP_DIR" -name '${project_name}_*.sql.gz' -mtime +7 -delete
+EOF
+chmod 700 /usr/local/bin/expenseflow-db-backup.sh
+echo "15 3 * * * root /usr/local/bin/expenseflow-db-backup.sh" > /etc/cron.d/expenseflow-backup
+chmod 644 /etc/cron.d/expenseflow-backup
+%{ endif ~}
+
+# 9. Create Idempotent Deployment Script (Used by both First Boot & GitHub Actions SSM)
+cat > /usr/local/bin/deploy.sh << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMAGE="$${1:-${docker_image}}"
+REGION="${aws_region}"
+SSM_PREFIX="/${project_name}/${environment}"
+
+echo "Fetching secrets from AWS SSM Parameter Store ($${SSM_PREFIX})..."
+DATABASE_URL=$(aws ssm get-parameter --name "$${SSM_PREFIX}/DATABASE_URL" --with-decryption --region "$${REGION}" --query "Parameter.Value" --output text)
+DB_PASSWORD=$(aws ssm get-parameter --name "$${SSM_PREFIX}/DB_PASSWORD" --with-decryption --region "$${REGION}" --query "Parameter.Value" --output text)
+NEXTAUTH_SECRET=$(aws ssm get-parameter --name "$${SSM_PREFIX}/NEXTAUTH_SECRET" --with-decryption --region "$${REGION}" --query "Parameter.Value" --output text)
+
+NEXTAUTH_URL=$(aws ssm get-parameter --name "$${SSM_PREFIX}/NEXTAUTH_URL" --region "$${REGION}" --query "Parameter.Value" --output text 2>/dev/null || true)
+if [ -z "$${NEXTAUTH_URL}" ] || [ "$${NEXTAUTH_URL}" = "None" ]; then
+  IMDS_TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+  PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $${IMDS_TOKEN}" http://169.254.169.254/latest/meta-data/public-ipv4)
+  NEXTAUTH_URL="http://$${PUBLIC_IP}"
+fi
+
+cd /opt/expenseflow
+
+cat > /opt/expenseflow/.env << ENVEOF
+DOCKER_IMAGE=$${IMAGE}
+DATABASE_URL=$${DATABASE_URL}
+DB_PASSWORD=$${DB_PASSWORD}
+NEXTAUTH_SECRET=$${NEXTAUTH_SECRET}
+NEXTAUTH_URL=$${NEXTAUTH_URL}
+NODE_ENV=production
+LOG_LEVEL=info
+ENVEOF
+chmod 600 /opt/expenseflow/.env
+chown ubuntu:ubuntu /opt/expenseflow/.env
+
+docker network inspect expenseflow-network >/dev/null 2>&1 || docker network create expenseflow-network
+
+echo "Pulling Docker image: $${IMAGE}..."
+export DOCKER_IMAGE="$${IMAGE}"
+export DB_PASSWORD="$${DB_PASSWORD}"
+docker compose pull
+
+echo "Starting containers..."
+docker compose up -d --remove-orphans
+
+%{ if !enable_rds ~}
+echo "Waiting for PostgreSQL container to be ready..."
+for i in $(seq 1 30); do
+  if docker exec ${project_name}-db pg_isready -U ${db_username} -d ${db_name} >/dev/null 2>&1; then
+    echo "PostgreSQL is ready!"
+    break
+  fi
+  sleep 2
+done
+%{ endif ~}
+
+echo "Running Prisma schema push..."
+docker run --rm \
+  --env-file /opt/expenseflow/.env \
+  --network expenseflow-network \
+  "$${IMAGE}" \
+  node ./node_modules/prisma/build/index.js db push --skip-generate
+
+echo "Waiting for application health check..."
+for i in $(seq 1 30); do
+  if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+    echo "Application is healthy!"
+    curl -s http://127.0.0.1:3000/api/health
+    echo ""
+    exit 0
+  fi
+  sleep 3
+done
+
+echo "ERROR: Application health check failed!"
+docker logs ${project_name} --tail 50
+exit 1
+EOF
+
+chmod 755 /usr/local/bin/deploy.sh
+
+# Mark bootstrap complete
+touch /var/lib/cloud/instance/expenseflow-bootstrap-ready
+
+# Attempt initial deploy if image is already published in GHCR
+/usr/local/bin/deploy.sh "${docker_image}" || echo "Initial image pull skipped or not yet published; CI/CD will deploy via SSM."
