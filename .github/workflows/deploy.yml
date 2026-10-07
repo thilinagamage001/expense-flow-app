@@ -104,16 +104,19 @@ jobs:
           EC2_IP=$(echo "$INSTANCE_INFO" | awk '{print $2}')
 
           if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ] || [ "$INSTANCE_ID" = "null" ]; then
-            echo "ERROR: No running EC2 instance found with tag Name=expenseflow-web-server."
-            echo "Please run 'terraform apply' locally first to provision the infrastructure."
-            exit 1
+            echo "NOTICE: No running EC2 instance found with tag Name=expenseflow-web-server."
+            echo "Skipping SSM deployment (run 'terraform apply' locally to provision EC2)."
+            echo "found=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
           echo "Deploying to EC2 instance $INSTANCE_ID ($EC2_IP)..."
+          echo "found=true" >> $GITHUB_OUTPUT
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "ec2_ip=$EC2_IP" >> $GITHUB_OUTPUT
 
       - name: Deploy Containers via AWS SSM Run Command
+        if: steps.ec2.outputs.found == 'true'
         run: |
           INSTANCE_ID="${{ steps.ec2.outputs.instance_id }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
@@ -175,6 +178,7 @@ jobs:
           fi
 
       - name: Verify Public Health Check
+        if: steps.ec2.outputs.found == 'true'
         run: |
           echo "Verifying public health endpoint at http://${{ steps.ec2.outputs.ec2_ip }}/api/health..."
           curl -f --retry 5 --retry-delay 5 "http://${{ steps.ec2.outputs.ec2_ip }}/api/health"
