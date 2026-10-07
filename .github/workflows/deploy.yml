@@ -136,7 +136,13 @@ jobs:
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy ExpenseFlow $IMAGE" \
-            --parameters "commands=[\"while [ ! -f /var/lib/cloud/instance/expenseflow-bootstrap-ready ]; do echo 'Waiting for initial cloud-init setup...'; sleep 5; done\",\"echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin\",\"/usr/local/bin/deploy.sh $IMAGE\"]" \
+            --parameters "commands=[
+              \"while [ ! -f /var/lib/cloud/instance/expenseflow-bootstrap-ready ]; do echo 'Waiting for initial cloud-init setup...'; sleep 5; done\",
+              \"sed -i '/Running Prisma schema push/,/skip-generate/d' /usr/local/bin/deploy.sh\",
+              \"echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin\",
+              \"/usr/local/bin/deploy.sh $IMAGE\",
+              \"docker exec -i expenseflow-db psql -v ON_ERROR_STOP=1 -U postgres -d expenseflow << 'EOF'\nCREATE TABLE IF NOT EXISTS \\\"users\\\" (\\\"id\\\" TEXT NOT NULL, \\\"name\\\" TEXT, \\\"email\\\" TEXT NOT NULL, \\\"password\\\" TEXT NOT NULL, \\\"image\\\" TEXT, \\\"createdAt\\\" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, \\\"updatedAt\\\" TIMESTAMP(3) NOT NULL, CONSTRAINT \\\"users_pkey\\\" PRIMARY KEY (\\\"id\\\"));\nCREATE TABLE IF NOT EXISTS \\\"expenses\\\" (\\\"id\\\" TEXT NOT NULL, \\\"userId\\\" TEXT NOT NULL, \\\"title\\\" TEXT NOT NULL, \\\"amount\\\" DOUBLE PRECISION NOT NULL, \\\"category\\\" TEXT NOT NULL, \\\"description\\\" TEXT, \\\"date\\\" TIMESTAMP(3) NOT NULL, \\\"createdAt\\\" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, \\\"updatedAt\\\" TIMESTAMP(3) NOT NULL, CONSTRAINT \\\"expenses_pkey\\\" PRIMARY KEY (\\\"id\\\"));\nCREATE UNIQUE INDEX IF NOT EXISTS \\\"users_email_key\\\" ON \\\"users\\\"(\\\"email\\\");\nCREATE INDEX IF NOT EXISTS \\\"expenses_userId_idx\\\" ON \\\"expenses\\\"(\\\"userId\\\");\nCREATE INDEX IF NOT EXISTS \\\"expenses_date_idx\\\" ON \\\"expenses\\\"(\\\"date\\\");\nCREATE INDEX IF NOT EXISTS \\\"expenses_category_idx\\\" ON \\\"expenses\\\"(\\\"category\\\");\nDO \\\$\\\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_userId_fkey') THEN ALTER TABLE \\\"expenses\\\" ADD CONSTRAINT \\\"expenses_userId_fkey\\\" FOREIGN KEY (\\\"userId\\\") REFERENCES \\\"users\\\"(\\\"id\\\") ON DELETE CASCADE ON UPDATE CASCADE; END IF; END \\\$\\\$;\nEOF\"
+            ]" \
             --query "Command.CommandId" \
             --output text)
 

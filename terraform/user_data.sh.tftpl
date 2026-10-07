@@ -279,12 +279,42 @@ for i in $(seq 1 30); do
 done
 %{ endif ~}
 
-echo "Running Prisma schema push..."
-docker run --rm \
-  --env-file /opt/expenseflow/.env \
-  --network expenseflow-network \
-  "$${IMAGE}" \
-  node ./node_modules/prisma/build/index.js db push --skip-generate
+echo "Applying database schema..."
+docker exec -i ${project_name}-db psql -v ON_ERROR_STOP=1 -U ${db_username} -d ${db_name} << 'SQLEOF'
+CREATE TABLE IF NOT EXISTS "users" (
+    "id" TEXT NOT NULL,
+    "name" TEXT,
+    "email" TEXT NOT NULL,
+    "password" TEXT NOT NULL,
+    "image" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+CREATE TABLE IF NOT EXISTS "expenses" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL,
+    "category" TEXT NOT NULL,
+    "description" TEXT,
+    "date" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    CONSTRAINT "expenses_pkey" PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "users_email_key" ON "users"("email");
+CREATE INDEX IF NOT EXISTS "expenses_userId_idx" ON "expenses"("userId");
+CREATE INDEX IF NOT EXISTS "expenses_date_idx" ON "expenses"("date");
+CREATE INDEX IF NOT EXISTS "expenses_category_idx" ON "expenses"("category");
+DO $$$$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_userId_fkey') THEN
+    ALTER TABLE "expenses" ADD CONSTRAINT "expenses_userId_fkey"
+      FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$$$;
+SQLEOF
 
 echo "Waiting for application health check..."
 for i in $(seq 1 30); do
