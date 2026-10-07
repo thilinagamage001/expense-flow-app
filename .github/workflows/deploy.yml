@@ -92,48 +92,34 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.7.0
-          terraform_wrapper: false
-
-      - name: Check for existing EC2 instance or provision with Terraform
-        id: infra
-        working-directory: ./terraform
-        env:
-          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-          TF_VAR_nextauth_secret: ${{ secrets.NEXTAUTH_SECRET }}
-          TF_VAR_docker_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-          TF_VAR_enable_rds: "false"
+      - name: Find Running EC2 Instance
+        id: ec2
         run: |
           INSTANCE_INFO=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=expenseflow-web-server" "Name=instance-state-name,Values=running,pending" \
+            --filters "Name=tag:Name,Values=expenseflow-web-server" "Name=instance-state-name,Values=running" \
             --query "Reservations[0].Instances[0].[InstanceId,PublicIpAddress]" \
-            --output text 2>/dev/null || echo "None None")
+            --output text)
 
           INSTANCE_ID=$(echo "$INSTANCE_INFO" | awk '{print $1}')
           EC2_IP=$(echo "$INSTANCE_INFO" | awk '{print $2}')
 
-          if [ "$INSTANCE_ID" != "None" ] && [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "null" ]; then
-            echo "Found existing running EC2 instance $INSTANCE_ID at $EC2_IP — reusing."
-          else
-            echo "No existing EC2 instance found — provisioning infrastructure via Terraform..."
-            terraform init
-            terraform plan -out=tfplan
-            terraform apply -auto-approve tfplan
-            INSTANCE_ID=$(terraform output -raw ec2_instance_id)
-            EC2_IP=$(terraform output -raw ec2_public_ip)
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ] || [ "$INSTANCE_ID" = "null" ]; then
+            echo "ERROR: No running EC2 instance found with tag Name=expenseflow-web-server."
+            echo "Please run 'terraform apply' locally first to provision the infrastructure."
+            exit 1
           fi
 
+          echo "Deploying to EC2 instance $INSTANCE_ID ($EC2_IP)..."
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "ec2_ip=$EC2_IP" >> $GITHUB_OUTPUT
 
-      - name: Wait for EC2 SSM Agent & Initial Bootstrap
+      - name: Deploy Containers via AWS SSM Run Command
         run: |
-          INSTANCE_ID="${{ steps.infra.outputs.instance_id }}"
-          echo "Waiting for SSM agent on $INSTANCE_ID to come online..."
-          for i in $(seq 1 40); do
+          INSTANCE_ID="${{ steps.ec2.outputs.instance_id }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+
+          echo "Waiting for SSM agent on $INSTANCE_ID to be Online..."
+          for i in $(seq 1 30); do
             PING_STATUS=$(aws ssm describe-instance-information \
               --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
               --query "InstanceInformationList[0].PingStatus" \
@@ -145,17 +131,12 @@ jobs:
             sleep 5
           done
 
-      - name: Deploy Containers via AWS SSM Run Command
-        run: |
-          INSTANCE_ID="${{ steps.infra.outputs.instance_id }}"
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-
           echo "Triggering deployment of $IMAGE on $INSTANCE_ID via SSM..."
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --comment "Deploy ExpenseFlow $IMAGE" \
-            --parameters "commands=[\"while [ ! -f /var/lib/cloud/instance/expenseflow-bootstrap-ready ]; do echo 'Waiting for cloud-init bootstrap...'; sleep 5; done\",\"/usr/local/bin/deploy.sh $IMAGE\"]" \
+            --parameters "commands=[\"while [ ! -f /var/lib/cloud/instance/expenseflow-bootstrap-ready ]; do echo 'Waiting for initial cloud-init setup...'; sleep 5; done\",\"echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin\",\"/usr/local/bin/deploy.sh $IMAGE\"]" \
             --query "Command.CommandId" \
             --output text)
 
@@ -187,11 +168,7 @@ jobs:
 
       - name: Verify Public Health Check
         run: |
-          echo "Verifying public health endpoint at http://${{ steps.infra.outputs.ec2_ip }}/api/health..."
-          curl -f --retry 5 --retry-delay 5 "http://${{ steps.infra.outputs.ec2_ip }}/api/health"
+          echo "Verifying public health endpoint at http://${{ steps.ec2.outputs.ec2_ip }}/api/health..."
+          curl -f --retry 5 --retry-delay 5 "http://${{ steps.ec2.outputs.ec2_ip }}/api/health"
           echo ""
-          echo "Deployment verified! App URL: http://${{ steps.infra.outputs.ec2_ip }}"
-
-      - name: Cleanup
-        if: always()
-        run: rm -f terraform/tfplan
+          echo "Deployment verified! App URL: http://${{ steps.ec2.outputs.ec2_ip }}"

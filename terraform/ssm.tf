@@ -13,6 +13,7 @@ resource "aws_ssm_parameter" "database_url" {
   description = "PostgreSQL connection string for ExpenseFlow"
   type        = "SecureString"
   value       = local.database_url
+  overwrite   = true
 
   tags = {
     Name = "${var.project_name}-param-database-url"
@@ -24,6 +25,7 @@ resource "aws_ssm_parameter" "db_password" {
   description = "Raw PostgreSQL password"
   type        = "SecureString"
   value       = var.db_password
+  overwrite   = true
 
   tags = {
     Name = "${var.project_name}-param-db-password"
@@ -36,6 +38,7 @@ resource "aws_ssm_parameter" "nextauth_secret" {
   description = "Secret key for NextAuth.js encryption"
   type        = "SecureString"
   value       = var.nextauth_secret
+  overwrite   = true
 
   tags = {
     Name = "${var.project_name}-param-nextauth-secret"
@@ -48,6 +51,7 @@ resource "aws_ssm_parameter" "nextauth_url" {
   description = "Canonical public URL for NextAuth.js"
   type        = "String"
   value       = "http://${aws_instance.web.public_ip}"
+  overwrite   = true
 
   tags = {
     Name = "${var.project_name}-param-nextauth-url"
