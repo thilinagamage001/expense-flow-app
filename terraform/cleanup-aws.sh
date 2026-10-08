@@ -32,36 +32,45 @@ for VPC_ID in $VPC_IDS; do
   [ "$VPC_ID" = "None" ] && continue
   echo "Cleaning up VPC: $VPC_ID"
 
-  # Delete non-default Security Groups
-  SG_IDS=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text)
-  for SG_ID in $SG_IDS; do
-    aws ec2 delete-security-group --region "$REGION" --group-id "$SG_ID" || true
+  # 1. Disassociate all non-main Route Table associations first
+  ASSOC_IDS=$(aws ec2 describe-route-tables --region "$REGION" --filters "Name=vpc-id,Values=$VPC_ID" --query "RouteTables[].Associations[?!Main].RouteTableAssociationId" --output text)
+  for ASSOC_ID in $ASSOC_IDS; do
+    [ "$ASSOC_ID" = "None" ] && continue
+    aws ec2 disassociate-route-table --region "$REGION" --association-id "$ASSOC_ID" || true
   done
 
-  # Delete Subnets
-  SUBNET_IDS=$(aws ec2 describe-subnets --region "$REGION" --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[].SubnetId" --output text)
-  for SUBNET_ID in $SUBNET_IDS; do
-    aws ec2 delete-subnet --region "$REGION" --subnet-id "$SUBNET_ID" || true
+  # 2. Delete all custom (non-main) Route Tables
+  RT_IDS=$(aws ec2 describe-route-tables --region "$REGION" --filters "Name=vpc-id,Values=$VPC_ID" --query "RouteTables[?length(Associations[?Main==\`true\`])==\`0\`].RouteTableId" --output text)
+  for RT_ID in $RT_IDS; do
+    [ "$RT_ID" = "None" ] && continue
+    aws ec2 delete-route-table --region "$REGION" --route-table-id "$RT_ID" || true
   done
 
-  # Detach and delete Internet Gateways
+  # 3. Detach and delete Internet Gateways
   IGW_IDS=$(aws ec2 describe-internet-gateways --region "$REGION" --filters "Name=attachment.vpc-id,Values=$VPC_ID" --query "InternetGateways[].InternetGatewayId" --output text)
   for IGW_ID in $IGW_IDS; do
+    [ "$IGW_ID" = "None" ] && continue
     aws ec2 detach-internet-gateway --region "$REGION" --internet-gateway-id "$IGW_ID" --vpc-id "$VPC_ID" || true
     aws ec2 delete-internet-gateway --region "$REGION" --internet-gateway-id "$IGW_ID" || true
   done
 
-  # Disassociate and delete non-main Route Tables
-  RT_IDS=$(aws ec2 describe-route-tables --region "$REGION" --filters "Name=vpc-id,Values=$VPC_ID" --query "RouteTables[?Associations[0].Main!=true].RouteTableId" --output text)
-  for RT_ID in $RT_IDS; do
-    ASSOC_IDS=$(aws ec2 describe-route-tables --region "$REGION" --route-table-ids "$RT_ID" --query "RouteTables[0].Associations[?!Main].RouteTableAssociationId" --output text)
-    for ASSOC_ID in $ASSOC_IDS; do
-      aws ec2 disassociate-route-table --region "$REGION" --association-id "$ASSOC_ID" || true
-    done
-    aws ec2 delete-route-table --region "$REGION" --route-table-id "$RT_ID" || true
+  # 4. Delete Subnets
+  SUBNET_IDS=$(aws ec2 describe-subnets --region "$REGION" --filters "Name=vpc-id,Values=$VPC_ID" --query "Subnets[].SubnetId" --output text)
+  for SUBNET_ID in $SUBNET_IDS; do
+    [ "$SUBNET_ID" = "None" ] && continue
+    aws ec2 delete-subnet --region "$REGION" --subnet-id "$SUBNET_ID" || true
   done
 
-  aws ec2 delete-vpc --region "$REGION" --vpc-id "$VPC_ID" || true
+  # 5. Delete non-default Security Groups
+  SG_IDS=$(aws ec2 describe-security-groups --region "$REGION" --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[?GroupName!='default'].GroupId" --output text)
+  for SG_ID in $SG_IDS; do
+    [ "$SG_ID" = "None" ] && continue
+    aws ec2 delete-security-group --region "$REGION" --group-id "$SG_ID" || true
+  done
+
+  # 6. Delete the VPC
+  aws ec2 delete-vpc --region "$REGION" --vpc-id "$VPC_ID"
+  echo "Deleted VPC: $VPC_ID"
 done
 
 echo "=== 4. Deleting IAM Instance Profile, Role & Policy ==="
