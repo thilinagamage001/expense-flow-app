@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1120"/>
+      <stop offset="100%" stop-color="#111827"/>
+    </linearGradient>
+    <filter id="glow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#34d399"/>
+    </marker>
+    <marker id="arrowOrange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#fb923c"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="520" rx="16" fill="url(#bgGrad)"/>
+  <rect x="12" y="12" width="1176" height="496" rx="12" fill="none" stroke="#1e293b" stroke-width="2"/>
+
+  <!-- Title -->
+  <text x="600" y="56" text-anchor="middle" fill="#f8fafc" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="26" font-weight="700" letter-spacing="0.5">
+    ExpenseFlow — Automated GitHub Actions CI/CD Pipeline
+  </text>
+  <text x="600" y="84" text-anchor="middle" fill="#94a3b8" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif" font-size="14">
+    Zero-SSH Continuous Delivery · Multi-Stage Docker Build · GHCR · AWS Systems Manager (SSM)
+  </text>
+
+  <!-- Stage 0: Git Push Trigger -->
+  <g filter="url(#glow)">
+    <rect x="35" y="185" width="165" height="150" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
+    <circle cx="117" cy="228" r="20" fill="#0f172a" stroke="#38bdf8" stroke-width="2"/>
+    <text x="117" y="234" text-anchor="middle" fill="#38bdf8" font-family="monospace" font-size="15" font-weight="700">git</text>
+    <text x="117" y="272" text-anchor="middle" fill="#f8fafc" font-family="system-ui, sans-serif" font-size="15" font-weight="700">Developer Push</text>
+    <text x="117" y="295" text-anchor="middle" fill="#94a3b8" font-family="monospace" font-size="12">git push main</text>
+    <text x="117" y="316" text-anchor="middle" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="11">Triggers Workflow</text>
+  </g>
+
+  <!-- Arrow 0 -> 1 -->
+  <line x1="200" y1="260" x2="242" y2="260" stroke="#38bdf8" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+
+  <!-- Stage 1: Lint & Typecheck -->
+  <g filter="url(#glow)">
+    <rect x="250" y="130" width="250" height="260" rx="12" fill="#111c33" stroke="#38bdf8" stroke-width="2"/>
+    <rect x="250" y="130" width="250" height="44" rx="12" fill="#0284c7"/>
+    <text x="375" y="158" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="15" font-weight="700">
+      1. Lint &amp; Type Check
+    </text>
+
+    <rect x="270" y="192" width="210" height="44" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="375" y="219" text-anchor="middle" fill="#e2e8f0" font-family="monospace" font-size="13">npm ci (Clean Install)</text>
+
+    <rect x="270" y="250" width="210" height="44" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="375" y="277" text-anchor="middle" fill="#e2e8f0" font-family="monospace" font-size="13">npm run lint (ESLint)</text>
+
+    <rect x="270" y="308" width="210" height="44" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="375" y="335" text-anchor="middle" fill="#e2e8f0" font-family="monospace" font-size="13">npx tsc --noEmit</text>
+
+    <text x="375" y="376" text-anchor="middle" fill="#38bdf8" font-family="system-ui, sans-serif" font-size="12" font-weight="600">
+      ✓ Quality Gate Passed
+    </text>
+  </g>
+
+  <!-- Arrow 1 -> 2 -->
+  <line x1="500" y1="260" x2="542" y2="260" stroke="#34d399" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+
+  <!-- Stage 2: Build & Push -->
+  <g filter="url(#glow)">
+    <rect x="550" y="130" width="265" height="260" rx="12" fill="#0f242a" stroke="#34d399" stroke-width="2"/>
+    <rect x="550" y="130" width="265" height="44" rx="12" fill="#059669"/>
+    <text x="682" y="158" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="15" font-weight="700">
+      2. Build &amp; Push Image
+    </text>
+
+    <rect x="570" y="192" width="225" height="44" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="682" y="219" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="13">Docker Buildx (GHA Cache)</text>
+
+    <rect x="570" y="250" width="225" height="44" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="682" y="277" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="13">Multi-Stage node:20-alpine</text>
+
+    <rect x="570" y="308" width="225" height="44" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="682" y="335" text-anchor="middle" fill="#e2e8f0" font-family="monospace" font-size="12">Push to ghcr.io (:latest)</text>
+
+    <text x="682" y="376" text-anchor="middle" fill="#34d399" font-family="system-ui, sans-serif" font-size="12" font-weight="600">
+      ✓ Immutable Artifact Ready
+    </text>
+  </g>
+
+  <!-- Arrow 2 -> 3 -->
+  <line x1="815" y1="260" x2="857" y2="260" stroke="#fb923c" stroke-width="2.5" marker-end="url(#arrowOrange)"/>
+
+  <!-- Stage 3: Deploy to AWS via SSM -->
+  <g filter="url(#glow)">
+    <rect x="865" y="130" width="300" height="260" rx="12" fill="#261914" stroke="#fb923c" stroke-width="2"/>
+    <rect x="865" y="130" width="300" height="44" rx="12" fill="#ea580c"/>
+    <text x="1015" y="158" text-anchor="middle" fill="#ffffff" font-family="system-ui, sans-serif" font-size="15" font-weight="700">
+      3. Deploy to AWS (Zero-SSH)
+    </text>
+
+    <rect x="885" y="190" width="260" height="38" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="1015" y="214" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="12.5">Lookup Running EC2 + SSM Online</text>
+
+    <rect x="885" y="238" width="260" height="38" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="1015" y="262" text-anchor="middle" fill="#e2e8f0" font-family="system-ui, sans-serif" font-size="12.5">Fetch Secrets from SSM Parameter Store</text>
+
+    <rect x="885" y="286" width="260" height="38" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="1015" y="310" text-anchor="middle" fill="#e2e8f0" font-family="monospace" font-size="12">/usr/local/bin/deploy.sh + SQL</text>
+
+    <rect x="885" y="334" width="260" height="38" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+    <text x="1015" y="358" text-anchor="middle" fill="#34d399" font-family="monospace" font-size="12" font-weight="600">GET /api/health == 200 OK</text>
+  </g>
+
+  <!-- Footer Banner -->
+  <rect x="250" y="425" width="700" height="44" rx="22" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="600" y="452" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, sans-serif" font-size="13.5" font-weight="500">
+    🔒 No SSH Keys (.pem) · Port 22 Closed · IAM Role Auth · KMS Encrypted Secrets · Zero-Downtime Rollout
+  </text>
+</svg>

@@ -22,7 +22,6 @@
 - [Environment Variables & Secrets](#environment-variables--secrets)
 - [Database](#database)
 - [Deployment](#deployment)
-- [Lessons Learned](#lessons-learned)
 - [API & Server Actions Reference](#api--server-actions-reference)
 
 ---
@@ -53,8 +52,8 @@ From a **DevOps & Cloud Engineering** perspective, this project was architected 
 | CI/CD Automation | GitHub Actions (`deploy.yml`) |
 | Configuration & Bootstrap | Cloud-Init (`user_data.sh.tftpl`) + AWS SSM Run Command |
 | Secret Management | AWS Systems Manager (SSM) Parameter Store (`SecureString` KMS) |
-| Reverse Proxy | Nginx (HTTP 80 → `127.0.0.1:3000` with WebSocket & header forwarding) |
-| OS & Runtime | Ubuntu 22.04 LTS (`x86_64`) · Node.js 20 Alpine |
+| Reverse Proxy | Nginx (HTTP 80 → `127.0.0.1:3000` with rate limiting & Gzip) |
+| OS & Runtime | Ubuntu 24.04 LTS (`x86_64`) · Node.js 20 Alpine |
 
 ### Application Stack
 
@@ -72,40 +71,7 @@ From a **DevOps & Cloud Engineering** perspective, this project was architected 
 
 ## AWS Architecture
 
-```mermaid
-flowchart LR
-    subgraph GitHub["GitHub ($0.00)"]
-        GHA["GitHub Actions CI/CD"]
-        GHCR["GitHub Container Registry (ghcr.io)"]
-    end
-
-    subgraph AWS["AWS Region: ap-southeast-1 ($0.00 Free Tier)"]
-        SSM["SSM Parameter Store\n(Encrypted KMS Secrets)"]
-        subgraph VPC["VPC 10.0.0.0/16 (Public Subnet 10.0.1.0/24)"]
-            IGW["Internet Gateway"]
-            subgraph EC2["EC2 t3.micro (Ubuntu 22.04 LTS, 4 GB Swap, 25 GB gp3 EBS)"]
-                Nginx["Nginx Reverse Proxy\n(Port 80/443, Rate Limiting)"]
-                SSMAgent["AWS SSM Agent\n(IAM Instance Profile)"]
-                subgraph DockerNet["Docker Network: expenseflow-network"]
-                    App["Container: expenseflow\n(Next.js 16 Standalone :3000)"]
-                    DB[("Container: expenseflow-db\n(PostgreSQL 16 Alpine :5432)")]
-                end
-                Cron["Nightly Cron: pg_dump\n(/opt/expenseflow/backups)"]
-            end
-        end
-    end
-
-    Users(("Users\nHTTP / HTTPS")) --> IGW
-    IGW --> Nginx
-    Nginx -->|"Proxies to 127.0.0.1:3000"| App
-    App -->|"Prisma TCP :5432"| DB
-    Cron -->|"02:00 UTC Backup"| DB
-    GHA -->|"1. Build & Push Image"| GHCR
-    GHA -->|"2. Trigger Run Command"| SSMAgent
-    SSMAgent -->|"3. Pull Latest Image"| GHCR
-    SSMAgent -->|"4. Fetch SecureString Secrets"| SSM
-    SSMAgent -->|"5. Restart & Health Check"| DockerNet
-```
+![ExpenseFlow AWS Architecture](./public/aws-architecture.jpg)
 
 ### Network Layout
 
@@ -134,10 +100,10 @@ All cloud resources are defined declaratively inside the [`terraform/`](./terraf
 |------|----------------|
 | `main.tf` | Terraform backend settings, AWS provider (`ap-southeast-1`), dynamic AZ lookup |
 | `vpc.tf` | Custom VPC (`10.0.0.0/16`), Internet Gateway, 2 public & 2 private subnets, route tables |
-| `security_groups.tf` | Least-privilege firewall rules; conditional SSH rule (`enable_ssh = false`) |
+| `security_groups.tf` | Least-privilege firewall rules; conditional SSH rule (`ssh_allowed_cidr`) |
 | `iam.tf` | EC2 IAM Role & Instance Profile with `AmazonSSMManagedInstanceCore` + scoped KMS/SSM read policy |
 | `ssm.tf` | KMS-encrypted `SecureString` parameters under `/expenseflow/production/*` |
-| `ec2.tf` | Ubuntu 22.04 AMI lookup, `t3.micro` with `cpu_credits = "standard"`, 25 GB `gp3` EBS volume |
+| `ec2.tf` | Ubuntu 24.04 AMI lookup, `t3.micro` with `cpu_credits = "standard"`, 25 GB `gp3` EBS volume |
 | `user_data.sh.tftpl` | Cloud-Init bootstrap template (Swap, Docker, Nginx, `/usr/local/bin/deploy.sh`, backup cron) |
 | `rds.tf` | Conditional RDS PostgreSQL module (`count = var.enable_rds ? 1 : 0`) |
 
@@ -157,32 +123,7 @@ All cloud resources are defined declaratively inside the [`terraform/`](./terraf
 
 Every push to `main` triggers the automated workflow in [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml):
 
-```mermaid
-flowchart TD
-    Push(["git push origin main"]) --> Stage1
-
-    subgraph Stage1["Job 1: lint-and-typecheck"]
-        L1["npm ci"] --> L2["npm run lint (ESLint)"]
-        L2 --> L3["npx tsc --noEmit (TypeScript)"]
-    end
-
-    Stage1 -->|"Fail"| Stop(["Pipeline Halts"])
-    Stage1 -->|"Pass"| Stage2
-
-    subgraph Stage2["Job 2: build-and-push"]
-        B1["Docker Buildx (Multi-Stage Alpine Image)"] --> B2["Push :latest & :sha to GHCR (ghcr.io)"]
-    end
-
-    Stage2 -->|"Pass"| Stage3
-
-    subgraph Stage3["Job 3: deploy-via-ssm (Zero-SSH)"]
-        D1["Query Running EC2 Instance ID by Tag"] --> D2["Wait for AWS SSM Agent Status == Online"]
-        D2 --> D3["Execute /usr/local/bin/deploy.sh via SSM Run Command\n(Fetch SSM Secrets + Pull GHCR Image + Docker Compose Up)"]
-        D3 --> D4["Verify HTTP 200 on /api/health & Apply Idempotent SQL Schema"]
-    end
-
-    Stage3 --> Live(["Production Live on AWS EC2"])
-```
+![ExpenseFlow CI/CD Pipeline](./public/cicd-pipeline.svg)
 
 **GitHub Secrets required:**
 
@@ -209,8 +150,8 @@ flowchart TD
 git clone https://github.com/thilinagamage001/expense-flow-app.git
 cd expense-flow-app
 
-# Build and start PostgreSQL + Next.js containers
-docker compose up -d --build
+# Start PostgreSQL container
+docker compose up -d
 
 # Check container health
 docker compose ps
@@ -241,7 +182,7 @@ Visit [http://localhost:3000](http://localhost:3000)
 
 | Role | Email | Password |
 |------|-------|----------|
-| Demo User | `demo@expenseflow.com` | `demo123` |
+| Demo User | `demo@expenseflow.com` | `Password123` |
 
 > In production, you can also register a new account directly via the `/register` page.
 
@@ -268,9 +209,10 @@ Secrets are **never** committed to Git or baked into Docker images. Terraform pr
 
 | SSM Parameter Path | Purpose |
 |--------------------|---------|
-| `/expenseflow/production/database-url` | Full PostgreSQL connection string injected into the `app` container |
-| `/expenseflow/production/db-password` | PostgreSQL superuser password injected into `expenseflow-db` |
-| `/expenseflow/production/nextauth-secret` | Cryptographic secret used by NextAuth v5 for session signing |
+| `/expenseflow/production/DATABASE_URL` | Full PostgreSQL connection string injected into the `app` container |
+| `/expenseflow/production/DB_PASSWORD` | PostgreSQL superuser password injected into `expenseflow-db` |
+| `/expenseflow/production/NEXTAUTH_SECRET` | Cryptographic secret used by NextAuth v5 for session signing |
+| `/expenseflow/production/NEXTAUTH_URL` | Public application URL used by NextAuth callbacks |
 
 ---
 
@@ -284,8 +226,8 @@ User (1) ──────────► (*) Expense
 
 | Table | Key Fields & Indexes |
 |-------|---------------------|
-| `users` | `id` (UUID), `email` (Unique), `name`, `password` (bcrypt hash), `image`, `createdAt`, `updatedAt` |
-| `expenses` | `id` (UUID), `amount` (`Decimal(10,2)`), `category`, `description`, `date`, `userId` (FK `ON DELETE CASCADE`) · Indexed on `(userId)`, `(date)`, `(category)` |
+| `users` | `id` (CUID), `email` (Unique), `name`, `password` (bcrypt hash), `image`, `createdAt`, `updatedAt` |
+| `expenses` | `id` (CUID), `title`, `amount` (`Float`), `category`, `description`, `date`, `userId` (FK `ON DELETE CASCADE`) · Indexed on `(userId)`, `(date)`, `(category)` |
 
 ### Useful Commands
 
@@ -312,7 +254,7 @@ nano terraform.tfvars   # Set db_password and nextauth_secret
 # Initialize and apply Terraform plan
 terraform init
 terraform plan
-terraform apply
+GODEBUG=netdns=go terraform apply
 ```
 
 Once `terraform apply` completes, EC2 automatically runs `user_data.sh.tftpl` to configure swap space, install Docker + Nginx, pull the container image, and start the stack.
@@ -329,32 +271,12 @@ git push origin main
 
 GitHub Actions automatically lints, builds the Docker image, pushes to GHCR, and triggers AWS SSM to update the running containers with zero manual intervention.
 
-### Key Production Gotchas & Fixes
+### Step 3: Tear Down Infrastructure ($0.00 Cleanup)
 
-| Issue | Root Cause | Fix Implemented |
-|-------|------------|-----------------|
-| `npm ci` fails inside Docker `deps` stage | `package.json` runs `"postinstall": "prisma generate"`, which requires `prisma/schema.prisma` before `COPY . .` | Added `COPY prisma ./prisma` prior to `RUN npm ci` in Stage 1 (`deps`) of the `Dockerfile` |
-| `npx prisma db push` crashes in Next.js standalone image (`Cannot find module 'effect'`) | Next.js standalone file tracing only bundles runtime imports (`@prisma/client`), stripping Prisma CLI transitive dependencies | Replaced runtime Prisma CLI calls with an idempotent SQL migration executed directly via `docker exec -i expenseflow-db psql` |
-| SSM Run Command fails with `/bin/sh: 5: Syntax error: "(" unexpected` | Passing multi-line SQL containing parentheses inside a double-quoted SSM JSON payload breaks `/bin/sh` parsing | Base64-encoded the SQL migration payload in CI/CD and decoded it on EC2 (`echo "$SQL_B64" \| base64 -d \| docker exec -i ...`) |
-| Heavy RAM pressure on `t3.micro` (1 GB RAM) | Running Docker daemon, PostgreSQL, Nginx, and Next.js simultaneously on 1 GB RAM risks OOM kills during spikes | Configured Cloud-Init to allocate a persistent **4 GB `/swapfile`** before starting Docker services |
-| Unexpected AWS EC2 burst charges | AWS defaults `t3.micro` instances to `unlimited` CPU credit mode, which bills for vCPU spikes | Explicitly pinned `cpu_credits = "standard"` in `terraform/ec2.tf` |
-| Terraform `connection reset by peer` during `apply` | Local ISP/router IPv6 blackholing caused intermittent AWS API timeouts and duplicate resource errors | Executed Terraform with `GODEBUG=netdns=go` to enforce reliable Go-native IPv4 DNS resolution |
-
----
-
-## Lessons Learned
-
-Real-world DevOps challenges encountered while building and deploying this system:
-
-1. **Separate Infrastructure Provisioning from Application CI/CD** — Running `terraform apply` on every `git push` without a remote S3/DynamoDB state backend causes state loss and duplicate resource collisions. Provisioning persistent infrastructure via local Terraform and restricting GitHub Actions to **immutable artifact build + SSM deployment** made the pipeline fast, idempotent, and reliable.
-
-2. **Eliminate SSH Keys with AWS SSM** — Managing `.pem` keys in GitHub Secrets and leaving port `22` open to `0.0.0.0/0` is a common security anti-pattern. Attaching `AmazonSSMManagedInstanceCore` to the EC2 IAM role enabled both automated CI/CD commands (`aws ssm send-command`) and interactive debugging (`aws ssm start-session`) with zero open management ports.
-
-3. **Build on CI Runners, Never on Micro Instances** — Compiling Next.js and TypeScript directly on a 1 GB RAM EC2 instance takes minutes and frequently triggers the Linux OOM killer. Building a multi-stage `node:20-alpine` image on GitHub Actions runners reduced the final image size and kept EC2 CPU/memory footprint minimal.
-
-4. **Next.js Standalone Output vs. ORM CLIs** — Next.js `output: "standalone"` aggressively tree-shakes `node_modules` to include only what the server imports at runtime. Because the Prisma CLI relies on heavy transitive packages (`effect`, `c12`), running `docker exec ... psql` against the PostgreSQL container for schema initialization proved far cleaner than bloating the production app image with dev dependencies.
-
-5. **Health-Gated Deployments** — Starting a container does not mean the application is ready. Implementing a dedicated `/api/health` endpoint that executes `SELECT 1` against PostgreSQL allowed both Docker Compose (`healthcheck`) and the SSM deployment script to verify end-to-end database connectivity before marking a deployment successful.
+```bash
+cd terraform
+./cleanup-aws.sh
+```
 
 ---
 
@@ -367,7 +289,7 @@ Real-world DevOps challenges encountered while building and deploying this syste
 | Action | `register(formData)` | Public | Validates with Zod, hashes password (`bcryptjs` 12 rounds), and creates user |
 | Action | `getExpenses(filters)` | Auth | Paginated expense query with category, inclusive date range, and debounced search filters |
 | Action | `createExpense(formData)` | Auth | Creates expense entry and revalidates `/`, `/expenses`, and `/analytics` caches |
-| Action | `updateExpense(id, formData)` | Auth | Verifies ownership and updates expense amount, category, date, or description |
+| Action | `updateExpense(id, formData)` | Auth | Verifies ownership and updates expense title, amount, category, date, or description |
 | Action | `deleteExpense(id)` | Auth | Verifies ownership and deletes expense record |
 | Action | `getExpenseStats()` | Auth | Computes monthly totals, top spending category, and 6-month trend aggregations |
 | Action | `exportExpensesToCSV()` | Auth | Generates an RFC-4180 compliant CSV with formula-injection protection |
