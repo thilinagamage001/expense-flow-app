@@ -1,6 +1,6 @@
-# 💸 ExpenseFlow — Cloud-Native Expense Tracker
+# 💸 ExpenseFlow: Cloud-Native Expense Tracker
 
-> Full-stack expense tracking platform with a **$0.00/month AWS Free Tier production architecture** — built to demonstrate Infrastructure as Code (Terraform), multi-stage Docker containerization, keyless AWS Systems Manager (SSM) orchestration, and automated GitHub Actions CI/CD.
+> Full-stack expense tracking platform with a **$0.00/month AWS Free Tier production architecture**, built to demonstrate Infrastructure as Code (Terraform), multi-stage Docker containerization, keyless AWS Systems Manager (SSM) orchestration, and automated GitHub Actions CI/CD.
 
 ![CI/CD](https://github.com/thilinagamage001/expense-flow-app/actions/workflows/deploy.yml/badge.svg)
 ![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform)
@@ -32,10 +32,10 @@
 
 From a **DevOps & Cloud Engineering** perspective, this project was architected end-to-end on **AWS (`ap-southeast-1`)** with a strict **Zero-Cost ($0.00/month) FinOps constraint**:
 
-- **100% Infrastructure as Code (Terraform)** — Automated provisioning of VPC, Subnets, Internet Gateway, Route Tables, Security Groups, IAM Roles, encrypted SSM Parameter Store secrets, and EC2 compute.
-- **Zero-SSH / Keyless Operations** — No port `22` exposed to the internet and no `.pem` keys stored in CI/CD. All deployments and shell sessions run through **AWS Systems Manager (SSM) Agent**.
-- **Immutable Container Delivery** — Multi-stage Docker builds compiled in GitHub Actions, pushed to **GitHub Container Registry (GHCR)**, and deployed onto EC2 via `/usr/local/bin/deploy.sh`.
-- **Self-Healing & Automated Backups** — Cloud-Init (`user_data`) bootstraps a 4 GB swapfile, Nginx reverse proxy, Docker Compose health checks, and a nightly `pg_dump` cron job with 7-day retention.
+- **100% Infrastructure as Code (Terraform):** Automated provisioning of VPC, Subnets, Internet Gateway, Route Tables, Security Groups, IAM Roles, encrypted SSM Parameter Store secrets, and EC2 compute.
+- **Zero-SSH / Keyless Operations:** No port `22` exposed to the internet and no `.pem` keys stored in CI/CD. All deployments and shell sessions run through **AWS Systems Manager (SSM) Agent**.
+- **Immutable Container Delivery:** Multi-stage Docker builds compiled in GitHub Actions, pushed to **GitHub Container Registry (GHCR)**, and deployed onto EC2 via `/usr/local/bin/deploy.sh`.
+- **Self-Healing & Automated Backups:** Cloud-Init (`user_data`) bootstraps a 4 GB swapfile, Nginx reverse proxy, Docker Compose health checks, and a nightly `pg_dump` cron job with 7-day retention.
 
 ---
 
@@ -45,7 +45,7 @@ From a **DevOps & Cloud Engineering** perspective, this project was architected 
 
 | Layer | Technology |
 |-------|-----------|
-| Cloud Provider | AWS (`ap-southeast-1` — Singapore) |
+| Cloud Provider | AWS (`ap-southeast-1`, Singapore) |
 | Infrastructure as Code | Terraform (`~> 5.0` AWS Provider) |
 | Containerization | Docker (Multi-Stage Standalone Build) + Docker Compose v2 |
 | Container Registry | GitHub Container Registry (`ghcr.io`) |
