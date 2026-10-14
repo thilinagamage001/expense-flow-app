@@ -301,3 +301,10 @@ cd terraform
 **ExpenseFlow** · Provisioned with Terraform · Containerized with Docker · Deployed on AWS · Automated with GitHub Actions
 
 </div>
+
+## Author
+
+**Thilina Gamage**
+
+- GitHub: [@thilinagamage001](https://github.com/thilinagamage001)
+- LinkedIn: [thilinagamage001](https://linkedin.com/in/thilinagamage001)
