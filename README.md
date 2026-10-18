@@ -262,6 +262,9 @@ GODEBUG=netdns=go terraform apply
 
 Once `terraform apply` completes, EC2 automatically runs `user_data.sh.tftpl` to configure swap space, install Docker + Nginx, pull the container image, and start the stack.
 
+<img width="1920" height="1080" alt="Screenshot From 2026-10-07 08-54-36" src="https://github.com/user-attachments/assets/4eed75e4-44c3-45b4-87a8-f5d6a7bede4f" />
+
+
 ### Step 2: Automated Code Deployments
 
 Push any commit to `main`:
@@ -273,6 +276,9 @@ git push origin main
 ```
 
 GitHub Actions automatically lints, builds the Docker image, pushes to GHCR, and triggers AWS SSM to update the running containers with zero manual intervention.
+
+<img width="1865" height="966" alt="Screenshot From 2026-10-07 10-11-51" src="https://github.com/user-attachments/assets/c637cabb-d943-4ced-94cf-9907a41f103c" />
+
 
 ### Step 3: Tear Down Infrastructure ($0.00 Cleanup)
 
